@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Health Check</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Hind:wght@400;500&display=swap">
+<style>
+:root{--bg:#F5F2FA;--card:#fff;--ink:#17203A;--mute:#5E667D;--line:#DDD8EA;--gold:#E8A317;--green:#2C7A58;--rose:#B8265E;--btn:#17203A;--btnt:#fff;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1426;--card:#19203A;--ink:#EEEAF8;--mute:#9AA1BB;--line:#2C3556;--gold:#F2B73F;--green:#5CC096;--rose:#F06A98;--btn:#F2B73F;--btnt:#17203A}}
+:root[data-theme="dark"]{--bg:#0F1426;--card:#19203A;--ink:#EEEAF8;--mute:#9AA1BB;--line:#2C3556;--gold:#F2B73F;--green:#5CC096;--rose:#F06A98;--btn:#F2B73F;--btnt:#17203A}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Hind,system-ui,sans-serif}
+main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+h1{font:700 28px/1.1 'Bricolage Grotesque',system-ui,sans-serif;margin:0}
+h2{font:700 20px/1.2 'Bricolage Grotesque',system-ui,sans-serif;margin:0 0 6px}
+.sub{color:var(--mute);margin:4px 0 16px}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav button{flex:1;padding:10px 4px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:500 15px Hind,sans-serif}
+nav button[aria-selected=true]{background:var(--btn);color:var(--btnt);border-color:var(--btn)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.view{position:relative;aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden;margin:10px 0}
+.view video{width:100%;height:100%;object-fit:cover}
+#sv{transform:scaleX(-1)}
+.oval{position:absolute;inset:12% 28%;border:2px dashed #fff9;border-radius:50%}
+button.go{width:100%;padding:13px;border:0;border-radius:10px;background:var(--btn);color:var(--btnt);font:700 16px 'Bricolage Grotesque',sans-serif}
+button.go:disabled{opacity:.5}
+button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+canvas#wave{width:100%;height:80px;display:block}
+.big{font:700 52px/1 'Bricolage Grotesque',sans-serif}
+.big small{font:500 16px Hind,sans-serif;color:var(--mute)}
+.msg{min-height:24px;margin:8px 0;color:var(--mute)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line)}
+.ok{color:var(--green)}.warn{color:var(--rose)}
+.note{font-size:13px;color:var(--mute);margin-top:18px}
+.hid{display:none}
+svg.sp{width:100%;height:64px}
+</style>
+</head>
+<body>
+<main>
+<h1>Health Check</h1>
+<p class="sub">Daily pulse and skin check, tracked against your own normal.</p>
+<nav role="tablist">
+<button role="tab" data-t="pulse" aria-selected="true">Pulse</button>
+<button role="tab" data-t="skin" aria-selected="false">Skin</button>
+<button role="tab" data-t="trend" aria-selected="false">Trends</button>
+</nav>
+
+<section id="pulse" class="card">
+<h2>Fingertip pulse</h2>
+<p class="sub">Cover the back camera and flash with your index finger. Hold still for 30 seconds.</p>
+<div class="view"><video id="pv" playsinline muted></video></div>
+<canvas id="pc" width="32" height="32" class="hid"></canvas>
+<canvas id="wave" width="440" height="80"></canvas>
+<div id="pOut" class="msg">Ready when you are.</div>
+<button class="go" id="pBtn">Start pulse check</button>
+</section>
+
+<section id="skin" class="card hid">
+<h2>Skin scan</h2>
+<p class="sub">Sit facing a window or soft light. Fill the oval with your face, no filters.</p>
+<div class="view"><video id="sv" playsinline muted></video><div class="oval"></div></div>
+<canvas id="sc" width="96" height="96" class="hid"></canvas>
+<div id="sOut" class="msg">Open the camera to begin.</div>
+<button class="go" id="sOpen">Open camera</button>
+<button class="go hid" id="sBtn" style="margin-top:8px">Scan now</button>
+</section>
+
+<section id="trend" class="card hid">
+<h2>Your trends</h2>
+<div id="tOut"></div>
+</section>
+
+<p class="note">Health Check gives wellness estimates, not medical readings. Camera values vary with light and movement. If something worries you, see a doctor. Photos and video stay on your phone.</p>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const Store={get(){try{return JSON.parse(localStorage.getItem('ss_hist')||'[]')}catch(e){return[]}},
+add(r){try{const h=this.get();h.push(r);localStorage.setItem('ss_hist',JSON.stringify(h.slice(-200)))}catch(e){}}};
+let stream=null,timer=null;
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+ stopCam();
+ document.querySelectorAll('nav button').forEach(x=>x.setAttribute('aria-selected',x===b));
+ ['pulse','skin','trend'].forEach(id=>$('#'+id).classList.toggle('hid',id!==b.dataset.t));
+ if(b.dataset.t==='trend')renderTrends();
+ $('#pBtn').disabled=false;$('#sBtn').classList.add('hid');$('#sOpen').classList.remove('hid');
+});
+
+async function openCam(video,face){
+ stopCam();
+ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:face,width:{ideal:face==='user'?640:320},height:{ideal:face==='user'?480:240}},audio:false});
+ video.srcObject=stream;await video.play();return stream.getVideoTracks()[0];
+}
+function stopCam(){clearInterval(timer);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+
+/* ---------- Pulse ---------- */
+function analyze(T,V){
+ const fs=30,N=Math.floor(T[T.length-1]/1000*fs),x=new Array(N);let j=0;
+ for(let i=0;i<N;i++){const t=i*1000/fs;while(j<T.length-2&&T[j+1]<t)j++;const f=(t-T[j])/((T[j+1]-T[j])||1);x[i]=V[j]+(V[j+1]-V[j])*f}
+ const ma=(a,w)=>a.map((_,i)=>{let s=0,c=0;for(let k=Math.max(0,i-w);k<=Math.min(a.length-1,i+w);k++){s+=a[k];c++}return s/c});
+ const lo=ma(x,2),base=ma(x,15),y=lo.map((v,i)=>v-base[i]);
+ const sd=Math.sqrt(y.reduce((s,v)=>s+v*v,0)/N),pk=[];
+ for(let i=2;i<N-2;i++){
+  if(y[i]>sd*0.4&&y[i]>y[i-1]&&y[i]>=y[i+1]&&y[i]>y[i-2]&&y[i]>=y[i+2]){
+   if(!pk.length||i-pk[pk.length-1]>=fs*0.33)pk.push(i);
+   else if(y[i]>y[pk[pk.length-1]])pk[pk.length-1]=i}}
+ const iv=[];for(let i=1;i<pk.length;i++)iv.push((pk[i]-pk[i-1])*1000/fs);
+ if(iv.length<12)return null;
+ const med=[...iv].sort((a,b)=>a-b)[Math.floor(iv.length/2)];
+ const good=iv.filter(v=>Math.abs(v-med)<med*0.25);
+ if(good.length<iv.length*0.7)return null;
+ const mean=good.reduce((a,b)=>a+b,0)/good.length,bpm=Math.round(60000/mean);
+ let s=0;for(let i=1;i<good.length;i++)s+=(good[i]-good[i-1])**2;
+ if(bpm<40||bpm>200)return null;
+ return{bpm,hrv:Math.round(Math.sqrt(s/(good.length-1)))};
+}
+function drawWave(V){
+ const c=$('#wave'),x=c.getContext('2d'),w=c.width,h=c.height;x.clearRect(0,0,w,h);
+ const a=V.slice(-150);if(a.length<10)return;
+ const m=a.reduce((p,q)=>p+q,0)/a.length,dv=a.map(v=>v-m),mx=Math.max(1,...dv.map(Math.abs));
+ x.strokeStyle=getComputedStyle(document.body).getPropertyValue('--rose')||'#B8265E';x.lineWidth=2;x.beginPath();
+ dv.forEach((v,i)=>{const px=i/(a.length-1)*w,py=h/2-v/mx*(h/2-6);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();
+}
+$('#pBtn').onclick=async()=>{
+ const btn=$('#pBtn'),out=$('#pOut');btn.disabled=true;out.textContent='Opening camera…';
+ let track;
+ try{track=await openCam($('#pv'),'environment')}catch(e){out.textContent='Camera blocked. Allow camera access in your browser and try again.';btn.disabled=false;return}
+ let torch=false;
+ try{const c=track.getCapabilities&&track.getCapabilities();if(c&&c.torch){await track.applyConstraints({advanced:[{torch:true}]});torch=true}}catch(e){}
+ const cx=$('#pc').getContext('2d',{willReadFrequently:true}),T=[],V=[],t0=performance.now();let fing=0,live=null;
+ timer=setInterval(()=>{
+  const t=performance.now()-t0;cx.drawImage($('#pv'),0,0,32,32);
+  const d=cx.getImageData(0,0,32,32).data;let r=0,g=0,b=0;
+  for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2]}
+  const k=d.length/4;r/=k;g/=k;b/=k;T.push(t);V.push(r);
+  const ok=r>90&&r>g*1.4&&r>b*1.4;if(ok)fing++;
+  drawWave(V);
+  const left=Math.max(0,Math.ceil(30-t/1000));
+  if(ok&&T.length%30===0&&t>12000){const lv=analyze(T,V);if(lv)live=lv.bpm}
+  out.innerHTML=ok?`Measuring… ${left}s left`+(live?`<div class="big">${live} <small>bpm (live)</small></div>`:`<div>Signal strength: ${Math.round(r)}</div>`)+(torch?'':'<div>No flash: use a bright room</div>'):'Cover the camera and flash fully with your fingertip.';
+  if(t>=30000){
+   stopCam();btn.disabled=false;
+   if(fing/T.length<0.8){out.innerHTML='<span class="warn">Finger was not steady on the camera. Try again with light pressure.</span>';return}
+   const res=analyze(T,V);
+   if(!res){out.innerHTML='<span class="warn">Signal was too noisy. Rest your hand on a table and try again.</span>';return}
+   Store.add({t:Date.now(),type:'pulse',bpm:res.bpm,hrv:res.hrv});
+   out.innerHTML=`<div class="big">${res.bpm} <small>bpm</small></div><div>Beat-to-beat variation: ${res.hrv} ms</div>`;
+  }
+ },33);
+};
+
+/* ---------- Skin ---------- */
+$('#sOpen').onclick=async()=>{
+ try{await openCam($('#sv'),'user');$('#sOpen').classList.add('hid');$('#sBtn').classList.remove('hid');$('#sOut').textContent='Fill the oval with your face, then tap Scan now.'}
+ catch(e){$('#sOut').textContent='Camera blocked. Allow camera access in your browser and try again.'}
+};
+$('#sBtn').onclick=()=>{
+ const v=$('#sv'),x=$('#sc').getContext('2d',{willReadFrequently:true}),w=v.videoWidth,h=v.videoHeight,s=Math.min(w,h)*0.5;
+ x.drawImage(v,(w-s)/2,(h-s)/2,s,s,0,0,96,96);
+ const d=x.getImageData(0,0,96,96).data,n=d.length/4,L=[];let R=0,G=0,B=0,gl=0;
+ for(let i=0;i<d.length;i+=4){R+=d[i];G+=d[i+1];B+=d[i+2];const l=.299*d[i]+.587*d[i+1]+.114*d[i+2];L.push(l);if(l>240)gl++}
+ const ml=L.reduce((a,b)=>a+b,0)/n,sd=Math.sqrt(L.reduce((a,b)=>a+(b-ml)**2,0)/n),out=$('#sOut');
+ if(ml<70){out.innerHTML='<span class="warn">Too dark. Face a window or turn on a light, then scan again.</span>';return}
+ if(gl/n>0.04){out.innerHTML='<span class="warn">Glare on your face. Move away from direct light and scan again.</span>';return}
+ const red=+((R/(R+G+B))*100).toFixed(1),even=+(100-sd/ml*100).toFixed(0);
+ const prev=Store.get().filter(r=>r.type==='skin'),base=prev.length?prev.reduce((a,r)=>a+r.red,0)/prev.length:null;
+ Store.add({t:Date.now(),type:'skin',red,even,light:Math.round(ml)});
+ let note='First scan saved. This becomes your baseline.';
+ if(base!==null){const dl=red-base;note=dl>0.8?'<span class="warn">Redder than your usual. Check for irritation, heat, or a new product.</span>':dl<-0.8?'<span class="ok">Calmer than your usual.</span>':'<span class="ok">About the same as your usual.</span>'}
+ out.innerHTML=`<div class="row"><span>Redness index</span><b>${red}</b></div><div class="row"><span>Evenness</span><b>${even}</b></div><p>${note}</p>`;
+};
+
+/* ---------- Trends ---------- */
+function spark(vals,color){
+ if(vals.length<2)return '<p class="sub">Take at least two readings to see a trend.</p>';
+ const mn=Math.min(...vals),mx=Math.max(...vals),r=(mx-mn)||1;
+ const pts=vals.map((v,i)=>`${(i/(vals.length-1)*300).toFixed(1)},${(56-(v-mn)/r*48).toFixed(1)}`).join(' ');
+ return `<svg class="sp" viewBox="0 0 300 64" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
+}
+function stat(a,u){if(!a.length)return '';const av=(a.reduce((x,y)=>x+y,0)/a.length).toFixed(1);return `<div class="row"><span>Latest</span><b>${a[a.length-1]}${u}</b></div><div class="row"><span>Average</span><b>${av}${u}</b></div><div class="row"><span>Range</span><b>${Math.min(...a)} to ${Math.max(...a)}${u}</b></div>`}
+function renderTrends(){
+ const h=Store.get(),p=h.filter(r=>r.type==='pulse'),s=h.filter(r=>r.type==='skin');
+ if(!h.length){$('#tOut').innerHTML='<p class="sub">Nothing yet. Take a pulse check or a skin scan and it will show up here.</p>';return}
+ const fmt=t=>new Date(t).toLocaleDateString(undefined,{day:'numeric',month:'short'});
+ $('#tOut').innerHTML=
+  `<h2 style="font-size:16px">Resting pulse (bpm)</h2>${spark(p.map(r=>r.bpm),'var(--rose)')}${stat(p.map(r=>r.bpm),' bpm')}`+
+  p.slice(-4).reverse().map(r=>`<div class="row"><span>${fmt(r.t)}</span><b>${r.bpm} bpm</b></div>`).join('')+
+  `<h2 style="font-size:16px;margin-top:18px">Skin redness index</h2>${spark(s.map(r=>r.red),'var(--gold)')}${stat(s.map(r=>r.red),'')}`+
+  s.slice(-4).reverse().map(r=>`<div class="row"><span>${fmt(r.t)}</span><b>${r.red}</b></div>`).join('');
+}
+</script>
+</body>
+</html>
